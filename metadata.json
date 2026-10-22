@@ -1,0 +1,8 @@
+{
+  "name": "Exambro SMP - EduCBT & Analisis Siswa",
+  "description": "Aplikasi ujian berbasis komputer (CBT Exambro) edukatif SMP dengan penilaian otomatis, grafik progres belajar, leaderboard, dan dashboard guru.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,216 @@
+{
+  "entities": {
+    "StudentResult": {
+      "title": "StudentResult",
+      "description": "Hasil ujian siswa SMP mencakup nama, kelas, mapel, skor, dan waktu pengerjaan.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik hasil ujian siswa"
+        },
+        "studentName": {
+          "type": "string",
+          "description": "Nama lengkap peserta didik SMP",
+          "maxLength": 100
+        },
+        "studentClass": {
+          "type": "string",
+          "description": "Kelas siswa SMP (misal: 7-A, 8-B, 9-A)",
+          "maxLength": 30
+        },
+        "nisn": {
+          "type": "string",
+          "description": "Nomor Induk Siswa Nasional",
+          "maxLength": 30
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "ID mata pelajaran",
+          "maxLength": 50
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "Nama mata pelajaran SMP",
+          "maxLength": 80
+        },
+        "score": {
+          "type": "number",
+          "description": "Nilai kuis (0 - 100)"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Status tuntas KKM"
+        },
+        "kkm": {
+          "type": "number",
+          "description": "Nilai KKM standar"
+        },
+        "totalQuestions": {
+          "type": "number",
+          "description": "Jumlah butir soal"
+        },
+        "correctCount": {
+          "type": "number",
+          "description": "Jumlah jawaban benar"
+        },
+        "wrongCount": {
+          "type": "number",
+          "description": "Jumlah jawaban salah"
+        },
+        "unansweredCount": {
+          "type": "number",
+          "description": "Jumlah tidak dijawab"
+        },
+        "accuracy": {
+          "type": "number",
+          "description": "Persentase akurasi pengerjaan"
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Durasi pengerjaan dalam detik"
+        },
+        "completedAt": {
+          "type": "string",
+          "description": "Waktu selesai ujian dalam format ISO",
+          "maxLength": 50
+        }
+      },
+      "required": [
+        "studentName",
+        "studentClass",
+        "subjectId",
+        "subjectName",
+        "score",
+        "passed",
+        "completedAt"
+      ]
+    },
+    "CustomQuestion": {
+      "title": "CustomQuestion",
+      "description": "Soal pilihan ganda SMP yang diupload guru atau dibuat oleh AI",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID butir soal"
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "ID mapel",
+          "maxLength": 50
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "Nama mapel",
+          "maxLength": 80
+        },
+        "grade": {
+          "type": "string",
+          "description": "Tingkat kelas",
+          "maxLength": 30
+        },
+        "topic": {
+          "type": "string",
+          "description": "Topik atau bab pembelajaran",
+          "maxLength": 100
+        },
+        "questionText": {
+          "type": "string",
+          "description": "Teks pertanyaan soal",
+          "maxLength": 2000
+        },
+        "options": {
+          "type": "object",
+          "description": "Opsi jawaban A, B, C, D"
+        },
+        "correctAnswer": {
+          "type": "string",
+          "description": "Kunci jawaban (A, B, C, atau D)",
+          "maxLength": 5
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Pembahasan materi edukatif",
+          "maxLength": 2000
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Tingkat kesulitan soal",
+          "maxLength": 20
+        }
+      },
+      "required": [
+        "subjectId",
+        "questionText",
+        "correctAnswer"
+      ]
+    },
+    "ExamCode": {
+      "title": "ExamCode",
+      "description": "Kode akses sesi ujian yang dibuat oleh guru untuk dimasukkan siswa",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Kode token ujian (misal: MAT8-2026)",
+          "maxLength": 30
+        },
+        "subjectId": {
+          "type": "string",
+          "description": "ID mata pelajaran",
+          "maxLength": 50
+        },
+        "subjectName": {
+          "type": "string",
+          "description": "Nama mata pelajaran",
+          "maxLength": 80
+        },
+        "grade": {
+          "type": "string",
+          "description": "Tingkat kelas sasaran",
+          "maxLength": 30
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "Durasi pengerjaan dalam menit"
+        },
+        "createdByName": {
+          "type": "string",
+          "description": "Nama guru pembuat sesi",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Waktu pembuatan kode",
+          "maxLength": 50
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Status keaktifan kode ujian"
+        }
+      },
+      "required": [
+        "code",
+        "subjectId",
+        "subjectName",
+        "durationMinutes",
+        "isActive"
+      ]
+    }
+  },
+  "firestore": {
+    "/studentResults/{resultId}": {
+      "schema": "StudentResult",
+      "description": "Koleksi real-time nilai ujian siswa SMP yang dapat diakses oleh siswa dan dianalisis oleh guru"
+    },
+    "/customQuestions/{questionId}": {
+      "schema": "CustomQuestion",
+      "description": "Koleksi bank soal yang diunggah secara massal, dibuat manual, atau dihasilkan oleh AI"
+    },
+    "/examCodes/{codeId}": {
+      "schema": "ExamCode",
+      "description": "Koleksi kode ujian aktif yang dimuat oleh guru untuk dimasukkan oleh siswa saat login"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidResultId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidResult(data) {
+      return data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 100 &&
+             data.studentClass is string && data.studentClass.size() > 0 && data.studentClass.size() <= 30 &&
+             data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 50 &&
+             data.subjectName is string && data.subjectName.size() <= 80 &&
+             data.score is number && data.score >= 0 && data.score <= 100 &&
+             data.passed is bool &&
+             data.completedAt is string && data.completedAt.size() <= 50;
+    }
+
+    function isValidQuestion(data) {
+      return data.subjectId is string && data.subjectId.size() > 0 && data.subjectId.size() <= 50 &&
+             data.questionText is string && data.questionText.size() > 0 && data.questionText.size() <= 2000 &&
+             data.correctAnswer is string && data.correctAnswer.size() <= 5;
+    }
+
+    // Student Exam Results Collection
+    match /studentResults/{resultId} {
+      allow get: if isValidResultId(resultId);
+      allow list: if true;
+      allow create: if isValidResultId(resultId) && isValidResult(request.resource.data);
+      allow update, delete: if false; // Results are immutable once submitted
+    }
+
+    // Custom Question Bank Collection
+    match /customQuestions/{questionId} {
+      allow get: if isValidResultId(questionId);
+      allow list: if true;
+      allow create: if isValidResultId(questionId) && isValidQuestion(request.resource.data);
+      allow delete: if isValidResultId(questionId);
+      allow update: if false;
+    }
+
+    // Exam Codes Collection (Created by Teachers)
+    match /examCodes/{codeId} {
+      allow get: if isValidResultId(codeId);
+      allow list: if true;
+      allow create, update: if isValidResultId(codeId);
+      allow delete: if isValidResultId(codeId);
+    }
+  }
+}
