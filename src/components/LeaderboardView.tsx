@@ -6,7 +6,6 @@ import {
   Search, 
   Clock, 
   Target, 
-  Sparkles, 
   UserCheck, 
   Filter 
 } from 'lucide-react';

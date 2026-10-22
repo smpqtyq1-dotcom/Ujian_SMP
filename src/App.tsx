@@ -21,19 +21,22 @@ import {
 import { 
   loadAllQuestions, 
   loadAllResults, 
-  loadAllExamCodes,
   saveStudentResult, 
   saveCustomQuestions, 
   deleteCustomQuestion, 
   clearAllResults, 
   saveActiveStudent, 
   loadActiveStudent, 
-  saveExamCode,
-  deleteExamCode,
-  saveActiveTeacher,
-  loadActiveTeacher,
+  clearLegacyTeacherData,
   subscribeToRealtimeUpdates 
 } from './utils/storage.ts';
+import {
+  deleteTeacherExamCode,
+  getTeacherSession,
+  loadTeacherExamCodes,
+  logoutTeacher,
+  saveTeacherExamCode,
+} from './utils/secureApi.ts';
 import { buildExamResult } from './utils/grading.ts';
 import { playFanfareSound, playNavigationSound } from './utils/soundEffects.ts';
 import { triggerConfetti } from './utils/confetti.ts';
@@ -54,24 +57,44 @@ export default function App() {
   const [currentSession, setCurrentSession] = useState<ExamSessionState | null>(null);
   const [latestResult, setLatestResult] = useState<ExamResult | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [serviceError, setServiceError] = useState('');
 
   // Initialize data from persistent real-time storage
   useEffect(() => {
+    let isMounted = true;
     testFirestoreConnection();
+    clearLegacyTeacherData();
     setQuestions(loadAllQuestions());
     setResults(loadAllResults());
-    setExamCodes(loadAllExamCodes());
     setActiveStudent(loadActiveStudent());
-    setActiveTeacher(loadActiveTeacher());
-    setIsInitialized(true);
 
     const unsubscribe = subscribeToRealtimeUpdates(() => {
       setResults(loadAllResults());
       setQuestions(loadAllQuestions());
-      setExamCodes(loadAllExamCodes());
     });
 
-    return () => unsubscribe();
+    void getTeacherSession()
+      .then(async (teacher) => {
+        if (!teacher) return;
+        const teacherCodes = await loadTeacherExamCodes();
+        if (!isMounted) return;
+        setActiveTeacher(teacher);
+        setExamCodes(teacherCodes);
+        setPortalMode('teacher');
+      })
+      .catch((error: unknown) => {
+        if (isMounted) {
+          setServiceError(error instanceof Error ? error.message : 'Sesi guru tidak dapat dipulihkan.');
+        }
+      })
+      .finally(() => {
+        if (isMounted) setIsInitialized(true);
+      });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   // Compute available subjects including any custom subjects added via upload
@@ -136,16 +159,30 @@ export default function App() {
   };
 
   // Handle Teacher Login via NIY
-  const handleTeacherLogin = (teacher: TeacherProfile) => {
-    saveActiveTeacher(teacher);
-    setActiveTeacher(teacher);
-    setPortalMode('teacher');
+  const handleTeacherLogin = async (teacher: TeacherProfile) => {
+    try {
+      const teacherCodes = await loadTeacherExamCodes();
+      setActiveTeacher(teacher);
+      setExamCodes(teacherCodes);
+      setPortalMode('teacher');
+      setServiceError('');
+    } catch (error) {
+      await logoutTeacher();
+      throw error;
+    }
   };
 
   // Handle Teacher Logout
   const handleTeacherLogout = () => {
-    saveActiveTeacher(null);
-    setActiveTeacher(null);
+    void logoutTeacher()
+      .then(() => {
+        setActiveTeacher(null);
+        setExamCodes([]);
+        setPortalMode('student');
+      })
+      .catch((error: unknown) => {
+        setServiceError(error instanceof Error ? error.message : 'Tidak dapat keluar dari akun guru.');
+      });
   };
 
   // Handle Answer Selection
@@ -238,15 +275,18 @@ export default function App() {
   };
 
   // Handle Saving Exam Code
-  const handleSaveExamCode = (code: ExamCode) => {
-    saveExamCode(code);
-    setExamCodes(loadAllExamCodes());
+  const handleSaveExamCode = async (code: ExamCode) => {
+    const savedCode = await saveTeacherExamCode(code);
+    setExamCodes((current) => [
+      savedCode,
+      ...current.filter((entry) => entry.id !== savedCode.id && entry.code !== savedCode.code),
+    ]);
   };
 
   // Handle Deleting Exam Code
-  const handleDeleteExamCode = (codeId: string) => {
-    deleteExamCode(codeId);
-    setExamCodes(loadAllExamCodes());
+  const handleDeleteExamCode = async (codeId: string) => {
+    await deleteTeacherExamCode(codeId);
+    setExamCodes((current) => current.filter((entry) => entry.id !== codeId));
   };
 
   // Handle Resetting Results
@@ -282,6 +322,17 @@ export default function App() {
         isExamRunning={!!currentSession}
       />
 
+      {serviceError && (
+        <div role="alert" className="mx-auto mt-4 max-w-7xl px-4 sm:px-6">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+            <span>{serviceError}</span>
+            <button type="button" onClick={() => setServiceError('')} className="font-bold" aria-label="Tutup pesan">
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Body */}
       <div className="flex-1 pb-12">
         {/* STUDENT PORTAL */}
@@ -304,8 +355,6 @@ export default function App() {
               />
             ) : (
               <PortalAuth
-                examCodes={examCodes}
-                activeTeacher={activeTeacher}
                 onStudentEnterExam={handleStudentEnterExam}
                 onTeacherLogin={handleTeacherLogin}
               />
@@ -332,8 +381,6 @@ export default function App() {
               />
             ) : (
               <PortalAuth
-                examCodes={examCodes}
-                activeTeacher={activeTeacher}
                 onStudentEnterExam={handleStudentEnterExam}
                 onTeacherLogin={handleTeacherLogin}
               />

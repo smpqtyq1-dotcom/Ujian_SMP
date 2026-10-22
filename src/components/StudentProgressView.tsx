@@ -6,7 +6,6 @@ import {
   BookOpen, 
   CheckCircle, 
   Target, 
-  Sparkles, 
   Flame, 
   ArrowUpRight,
   Filter
@@ -78,7 +77,7 @@ export const StudentProgressView: React.FC<StudentProgressViewProps> = ({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-semibold mb-2">
-            <Sparkles className="w-3.5 h-3.5" />
+            <TrendingUp className="w-3.5 h-3.5" />
             Visual Progress & Learning Motivation
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">

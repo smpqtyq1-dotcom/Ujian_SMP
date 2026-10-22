@@ -8,8 +8,7 @@ import {
   Minimize, 
   LogOut,
   User,
-  School,
-  Sparkles
+  School
 } from 'lucide-react';
 import { StudentProfile, TeacherProfile } from '../types/quiz.ts';
 import { isSoundEnabled, setSoundEnabled, playNavigationSound } from '../utils/soundEffects.ts';
@@ -91,7 +90,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 font-medium">
-                  SMP Negeri 1 Nusantara • Ujian Terpadu
+                  SMP Al-Qur'an Terpadu Yanbu'ul Quran 1
                 </p>
               </div>
             </button>
@@ -165,10 +164,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
                 <div className="text-left text-xs">
                   <div className="font-semibold text-indigo-200 truncate max-w-[130px]">
-                    {activeTeacher.name}
-                  </div>
-                  <div className="text-indigo-400/80 text-[10px] font-mono">
-                    NIY: {activeTeacher.niy}
+                    Guru
                   </div>
                 </div>
                 <button

@@ -42,6 +42,8 @@ export interface Question {
 export interface StudentProfile {
   name: string;
   studentClass: string;
+  noAbsen?: string;
+  /** Kept for compatibility with previously stored student records. */
   nisn?: string;
   examCode?: string;
 }
@@ -49,14 +51,14 @@ export interface StudentProfile {
 export interface TeacherProfile {
   id: string;
   name: string;
-  niy: string; // Nomor Induk Yayasan / NIP Guru
+  niy?: string;
   subject: string;
   schoolName?: string;
 }
 
 export interface ExamCode {
   id: string;
-  code: string; // Misal: MAT8-2026
+  code: string;
   title: string;
   subjectId: string;
   subjectName: string;
@@ -66,7 +68,7 @@ export interface ExamCode {
   questionCount: number;
   questionIds?: string[];
   createdByName: string;
-  createdByNiy: string;
+  createdByNiy?: string;
   createdAt: string;
   isActive: boolean;
 }
@@ -103,6 +105,8 @@ export interface ExamResult {
   id: string;
   studentName: string;
   studentClass: string;
+  noAbsen?: string;
+  /** Kept for compatibility with previously stored results. */
   nisn?: string;
   examCode?: string;
   subjectId: string;

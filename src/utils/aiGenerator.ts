@@ -45,26 +45,61 @@ export async function generateQuestionsWithAI(req: AIGenerateRequest): Promise<Q
  * AI Document & Freeform Text Parser
  * Parses raw text pasted from Word/PDF/notes and automatically identifies questions, options, and bold/marked answer keys
  */
-export async function parseDocumentTextWithAI(rawText: string, subjectName: string, grade: any): Promise<Question[]> {
-  try {
-    const response = await fetch('/api/ai/parse-text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rawText, subjectName, grade }),
-    });
+export async function parseDocumentTextWithAI(
+  rawText: string,
+  subjectId: string,
+  subjectName: string,
+  grade: AIGenerateRequest['grade']
+): Promise<Question[]> {
+  const response = await fetch('/api/ai/parse-text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rawText, subjectId, subjectName, grade }),
+  });
+  const data = await response.json().catch(() => ({}));
 
-    if (response.ok) {
-      const data = await response.json();
-      if (Array.isArray(data.questions) && data.questions.length > 0) {
-        return data.questions;
-      }
-    }
-  } catch (err) {
-    console.warn('AI parser endpoint fallback to local pattern extractor:', err);
+  if (!response.ok) {
+    throw new Error(data.error || 'Dokumen belum dapat diproses. Silakan coba kembali.');
+  }
+  if (!Array.isArray(data.questions) || data.questions.length === 0) {
+    throw new Error('Tidak ada soal pilihan ganda yang dapat dibuat dari dokumen ini.');
   }
 
-  // Local intelligent regex parser for Word/PDF copy-paste
-  return extractQuestionsFromRawText(rawText, subjectName, grade);
+  return data.questions.map((question: Record<string, unknown>, index: number) => {
+    const options = question.options as Record<string, unknown> | undefined;
+    const correctAnswer = question.correctAnswer;
+    const questionText = question.questionText;
+    const isOptionKey = (value: unknown): value is OptionKey =>
+      value === 'A' || value === 'B' || value === 'C' || value === 'D';
+    const optionA = options?.A;
+    const optionB = options?.B;
+    const optionC = options?.C;
+    const optionD = options?.D;
+
+    if (
+      typeof questionText !== 'string' ||
+      typeof optionA !== 'string' || !optionA.trim() ||
+      typeof optionB !== 'string' || !optionB.trim() ||
+      typeof optionC !== 'string' || !optionC.trim() ||
+      typeof optionD !== 'string' || !optionD.trim() ||
+      !isOptionKey(correctAnswer)
+    ) {
+      throw new Error(`Format soal nomor ${index + 1} dari dokumen tidak valid.`);
+    }
+
+    return {
+      id: `q-doc-${Date.now()}-${index}`,
+      subjectId,
+      subjectName,
+      grade,
+      topic: typeof question.topic === 'string' ? question.topic : 'Hasil Import Dokumen',
+      questionText,
+      options: { A: optionA, B: optionB, C: optionC, D: optionD },
+      correctAnswer,
+      explanation: typeof question.explanation === 'string' ? question.explanation : '',
+      difficulty: 'Sedang',
+    };
+  });
 }
 
 /**

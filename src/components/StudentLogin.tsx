@@ -3,7 +3,6 @@ import {
   User, 
   School, 
   KeyRound, 
-  Sparkles, 
   Play, 
   Clock, 
   Target, 
@@ -29,11 +28,10 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
   onStartExam,
 }) => {
   const [name, setName] = useState(activeStudent?.name || '');
-  const [studentClass, setStudentClass] = useState(activeStudent?.studentClass || '8-A');
-  const [customClass, setCustomClass] = useState('');
-  const [nisn, setNisn] = useState(activeStudent?.nisn || '');
+  const [studentClass, setStudentClass] = useState(activeStudent?.studentClass || '8A');
+  const [attendanceNumber, setAttendanceNumber] = useState(activeStudent?.noAbsen || '');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(subjects[0]?.id || 'matematika');
-  const [token, setToken] = useState('SMP-2026');
+  const [token, setToken] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
   // Count questions available per subject
@@ -50,8 +48,8 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
     if (params.get('autostart') === '1') {
       const demoStudent: StudentProfile = {
         name: activeStudent?.name || 'Siswa Berprestasi',
-        studentClass: activeStudent?.studentClass || '8-A',
-        nisn: '0089123499',
+        studentClass: activeStudent?.studentClass || '8A',
+        noAbsen: activeStudent?.noAbsen,
       };
       onStartExam(demoStudent, selectedSubjectId);
     }
@@ -66,14 +64,8 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
       return;
     }
 
-    const finalClass = studentClass === 'custom' ? customClass.trim() : studentClass;
-    if (!finalClass) {
-      setErrorMsg('Silakan tentukan kelas Anda.');
-      return;
-    }
-
     if (!token.trim()) {
-      setErrorMsg('Masukkan token ujian (contoh: SMP-2026).');
+      setErrorMsg('Masukkan kode ujian dari guru.');
       return;
     }
 
@@ -86,8 +78,8 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
     onStartExam(
       {
         name: name.trim(),
-        studentClass: finalClass,
-        nisn: nisn.trim() || undefined,
+        studentClass,
+        noAbsen: attendanceNumber.trim() || undefined,
       },
       selectedSubjectId
     );
@@ -100,7 +92,7 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
         <div className="absolute right-0 top-0 translate-x-8 -translate-y-8 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 max-w-2xl">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-xs font-semibold mb-3">
-            <Sparkles className="w-3.5 h-3.5" />
+            <School className="w-3.5 h-3.5" />
             Computer Based Test (CBT) Siswa SMP
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-2">
@@ -160,56 +152,33 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
                     onChange={(e) => setStudentClass(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                   >
-                    <optgroup label="Kelas 7">
-                      <option value="7-A">Kelas 7-A</option>
-                      <option value="7-B">Kelas 7-B</option>
-                      <option value="7-C">Kelas 7-C</option>
-                    </optgroup>
-                    <optgroup label="Kelas 8">
-                      <option value="8-A">Kelas 8-A</option>
-                      <option value="8-B">Kelas 8-B</option>
-                      <option value="8-C">Kelas 8-C</option>
-                    </optgroup>
-                    <optgroup label="Kelas 9">
-                      <option value="9-A">Kelas 9-A</option>
-                      <option value="9-B">Kelas 9-B</option>
-                      <option value="9-C">Kelas 9-C</option>
-                    </optgroup>
-                    <option value="custom">Lainnya (Ketik Manual)...</option>
+                    {['7', '8', '9'].flatMap((grade) => (
+                      <optgroup key={grade} label={`Kelas ${grade}`}>
+                        {['A', 'B', 'C', 'D', 'E'].map((room) => (
+                          <option key={`${grade}${room}`} value={`${grade}${room}`}>
+                            Kelas {grade}{room}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
               </div>
 
-              {/* NISN / No Peserta */}
+              {/* Nomor absen */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  NISN / No. Peserta <span className="text-slate-400 font-normal">(Opsional)</span>
+                  No. Absen <span className="text-slate-400 font-normal">(Opsional)</span>
                 </label>
                 <input
                   type="text"
-                  value={nisn}
-                  onChange={(e) => setNisn(e.target.value)}
-                  placeholder="Contoh: 0089123412"
+                  value={attendanceNumber}
+                  onChange={(e) => setAttendanceNumber(e.target.value)}
+                  placeholder="Masukkan nomor absen"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                 />
               </div>
             </div>
-
-            {studentClass === 'custom' && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Nama Kelas Kustom
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={customClass}
-                  onChange={(e) => setCustomClass(e.target.value)}
-                  placeholder="Misal: 8-Unggulan"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                />
-              </div>
-            )}
 
             {/* Mata Pelajaran Selector */}
             <div className="pt-2">
@@ -256,29 +225,20 @@ export const StudentLogin: React.FC<StudentLoginProps> = ({
             <div className="pt-2">
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
                 <span>Token Ujian CBT <span className="text-rose-500">*</span></span>
-                <span className="text-[11px] text-slate-500 font-normal">Token standar: SMP-2026</span>
+                <span className="text-[11px] text-slate-500 font-normal">Kode diberikan oleh guru.</span>
               </label>
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <KeyRound className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="text"
-                    required
-                    value={token}
-                    onChange={(e) => setToken(e.target.value.toUpperCase())}
-                    placeholder="Masukkan token..."
-                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-mono tracking-wider text-sm uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                  />
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <KeyRound className="w-4 h-4" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setToken('SMP-2026')}
-                  className="px-3 py-2.5 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                >
-                  Gunakan Default
-                </button>
+                <input
+                  type="text"
+                  required
+                  value={token}
+                  onChange={(e) => setToken(e.target.value.toUpperCase())}
+                  placeholder="Masukkan kode ujian"
+                  className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-mono tracking-wider text-sm uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                />
               </div>
             </div>
 

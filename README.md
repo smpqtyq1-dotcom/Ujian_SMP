@@ -2,19 +2,23 @@
 <img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
 
-# Run and deploy your AI Studio app
+# SMP Al-Qur'an Terpadu Yanbu'ul Quran 1 - CBT
 
-This contains everything you need to run your app locally.
+## Menjalankan aplikasi
 
-View your app in AI Studio: https://ai.studio/apps/2b9249d4-bf7b-438a-9adb-08aed020af87
+**Prasyarat:** Node.js
 
-## Run Locally
+1. Pasang dependensi dengan `npm install`.
+2. Salin `.env.example` menjadi `.env.local`, lalu isi konfigurasi server yang diperlukan.
+3. Jalankan `npm run dev` untuk aplikasi dan API lokal. `npm run build` lalu `npm run preview` dapat digunakan untuk memeriksa build.
 
-**Prerequisites:**  Node.js
+## Konfigurasi server
 
+API untuk login guru dan kode ujian memerlukan Firebase Admin. Isi `GOOGLE_APPLICATION_CREDENTIALS` dengan path lokal ke service-account JSON, atau gunakan `FIREBASE_SERVICE_ACCOUNT_JSON`. Jangan commit file service account atau `.env.local`.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- `SESSION_SECRET`: rahasia acak minimal 32 karakter untuk cookie sesi guru.
+- `TEACHER_NIY_ACCOUNTS`: JSON array akun guru, misalnya `[{"id":"guru-1","name":"Nama Guru","niy":"NIY-RAHASIA","subject":"Matematika"}]`. Nilai NIY hanya disimpan di environment server.
+- `FIREBASE_PROJECT_ID` dan `FIRESTORE_DATABASE_ID`: opsional jika menggunakan project/database pada `firebase-applet-config.json`.
+- `GEMINI_API_KEY`: diperlukan untuk membuat soal dari dokumen Word/PDF; simpan hanya di environment server.
+
+Jika variabel server belum diisi, endpoint terkait akan menampilkan pesan konfigurasi yang jelas dan fitur tersebut tidak dapat digunakan.

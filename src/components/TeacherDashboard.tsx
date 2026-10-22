@@ -6,8 +6,6 @@ import {
   HelpCircle, 
   Download, 
   Upload, 
-  FileSpreadsheet, 
-  FileText, 
   Search, 
   Filter, 
   PlusCircle, 
@@ -18,16 +16,10 @@ import {
   BarChart2, 
   Layers, 
   FileCheck,
-  RefreshCw,
-  Sparkles,
-  Printer,
-  Copy,
   KeyRound,
   GraduationCap,
   Trophy,
-  ArrowRight,
   LogOut,
-  Send,
   Loader2
 } from 'lucide-react';
 import { 
@@ -36,20 +28,15 @@ import {
   OptionKey, 
   Question, 
   SubjectMeta, 
-  TeacherProfile,
-  AIGenerateRequest 
+  TeacherProfile
 } from '../types/quiz.ts';
 import { formatTime, formatDateIndo } from '../utils/grading.ts';
 import { parseQuestionsFromCSV, generateCSVTemplate } from '../utils/csvParser.ts';
 import { StudentAnswerSheetModal } from './StudentAnswerSheetModal.tsx';
 import { StudentProgressView } from './StudentProgressView.tsx';
 import { LeaderboardView } from './LeaderboardView.tsx';
-import { 
-  generateQuestionsWithAI, 
-  parseDocumentTextWithAI, 
-  exportQuestionsToWord, 
-  openPrintableDocument 
-} from '../utils/aiGenerator.ts';
+import { parseDocumentTextWithAI } from '../utils/aiGenerator.ts';
+import { extractTextFromDocument } from '../utils/documentParser.ts';
 import { playNavigationSound, playSuccessSound } from '../utils/soundEffects.ts';
 
 interface TeacherDashboardProps {
@@ -62,11 +49,11 @@ interface TeacherDashboardProps {
   onAddCustomQuestions: (newQuestions: Question[]) => void;
   onDeleteQuestion: (id: string) => void;
   onResetResults: () => void;
-  onSaveExamCode: (code: ExamCode) => void;
-  onDeleteExamCode: (codeId: string) => void;
+  onSaveExamCode: (code: ExamCode) => Promise<void>;
+  onDeleteExamCode: (codeId: string) => Promise<void>;
 }
 
-export type TeacherTab = 'results' | 'analytics' | 'leaderboard' | 'ai_generator' | 'exam_codes' | 'questions';
+export type TeacherTab = 'results' | 'analytics' | 'leaderboard' | 'document_import' | 'exam_codes' | 'questions';
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   results,
@@ -98,18 +85,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [uploadSuccessMsg, setUploadSuccessMsg] = useState('');
   const [showGuideModal, setShowGuideModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
 
-  // AI Question Generator State
+  // Document question import state
   const [aiSubject, setAiSubject] = useState(subjects[0]?.name || 'Matematika SMP');
+  const [aiSubjectId, setAiSubjectId] = useState(subjects[0]?.id || 'matematika');
   const [aiGrade, setAiGrade] = useState<'Kelas 7' | 'Kelas 8' | 'Kelas 9'>('Kelas 8');
-  const [aiTopic, setAiTopic] = useState('Teorema Pythagoras dan Penerapannya');
-  const [aiQuestionCount, setAiQuestionCount] = useState<number>(5);
-  const [aiDifficulty, setAiDifficulty] = useState<'Mudah' | 'Sedang' | 'Sulit' | 'Campuran'>('Campuran');
-  const [aiRawText, setAiRawText] = useState('');
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [aiGeneratedQuestions, setAiGeneratedQuestions] = useState<Question[]>([]);
   const [aiSuccessFeedback, setAiSuccessFeedback] = useState('');
-  const [aiMode, setAiMode] = useState<'prompt' | 'document'>('prompt');
+  const [selectedDocumentName, setSelectedDocumentName] = useState('');
+  const [documentError, setDocumentError] = useState('');
+  const [documentQuestionsSaved, setDocumentQuestionsSaved] = useState(false);
 
   // Exam Code Manager State
   const [newCodeName, setNewCodeName] = useState('');
@@ -119,6 +106,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [newCodeDuration, setNewCodeDuration] = useState(20);
   const [newCodeKKM, setNewCodeKKM] = useState(75);
   const [codeSuccessMsg, setCodeSuccessMsg] = useState('');
+  const [codeErrorMsg, setCodeErrorMsg] = useState('');
+  const [isSavingCode, setIsSavingCode] = useState(false);
+  const [deletingCodeId, setDeletingCodeId] = useState('');
 
   // Overall Metrics
   const totalSubmissions = results.length;
@@ -191,102 +181,44 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       .sort((a, b) => a.accuracy - b.accuracy);
   }, [results]);
 
-  // AI Question Generation Handler
-  const handleGenerateQuestionsAI = async () => {
+  const handleProcessDocument = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+
     setIsGeneratingAI(true);
+    setDocumentError('');
     setAiSuccessFeedback('');
+    setDocumentQuestionsSaved(false);
+    setSelectedDocumentName(file.name);
 
     try {
-      if (aiMode === 'document' && aiRawText.trim()) {
-        const parsed = await parseDocumentTextWithAI(aiRawText, aiSubject, aiGrade);
-        setAiGeneratedQuestions(parsed);
-        setAiSuccessFeedback(`Berhasil membedah teks & mengekstrak ${parsed.length} butir soal pilihan ganda dari dokumen materi!`);
-      } else {
-        const req: AIGenerateRequest = {
-          subjectName: aiSubject,
-          grade: aiGrade,
-          topic: aiTopic.trim(),
-          questionCount: Number(aiQuestionCount) || 5,
-          difficulty: aiDifficulty,
-        };
-        const generated = await generateQuestionsWithAI(req);
-        setAiGeneratedQuestions(generated);
-        setAiSuccessFeedback(`AI berhasil menghasilkan ${generated.length} butir soal pilihan ganda materi "${aiTopic}" lengkap dengan kunci jawaban tebal!`);
-      }
-      playSuccessSound();
+      const text = await extractTextFromDocument(file);
+      const parsed = await parseDocumentTextWithAI(text, String(aiSubjectId), aiSubject, aiGrade);
+      setAiGeneratedQuestions(parsed);
     } catch (err) {
-      console.error('Error generating AI questions:', err);
+      console.error('Error processing uploaded document:', err);
+      setAiGeneratedQuestions([]);
+      setDocumentError(err instanceof Error ? err.message : 'Dokumen tidak dapat diproses.');
     } finally {
       setIsGeneratingAI(false);
+      input.value = '';
     }
   };
 
-  // Export to Microsoft Word with BOLD answer keys
-  const handleExportWord = () => {
-    if (aiGeneratedQuestions.length === 0) return;
-    exportQuestionsToWord(aiGeneratedQuestions, {
-      title: `Paket Ujian ${aiSubject} - ${aiGrade}`,
-      subjectName: aiSubject,
-      grade: aiGrade,
-      teacherName: activeTeacher ? activeTeacher.name : 'Dewan Guru SMP',
-      durationMinutes: 20,
-      kkm: 75,
-    });
-  };
-
-  // Open Print / PDF Window with BOLD answer keys
-  const handlePrintPDF = () => {
-    if (aiGeneratedQuestions.length === 0) return;
-    openPrintableDocument(aiGeneratedQuestions, {
-      title: `Asesmen ${aiSubject} ${aiGrade}`,
-      subjectName: aiSubject,
-      grade: aiGrade,
-      teacherName: activeTeacher ? activeTeacher.name : 'Dewan Guru SMP',
-      durationMinutes: 20,
-      kkm: 75,
-    });
-  };
-
-  // Save AI questions into question bank
-  const handleSaveAIToBank = () => {
-    if (aiGeneratedQuestions.length === 0) return;
+  const handleSaveDocumentQuestions = () => {
+    if (aiGeneratedQuestions.length === 0 || documentQuestionsSaved) return;
     onAddCustomQuestions(aiGeneratedQuestions);
-    setAiSuccessFeedback(`${aiGeneratedQuestions.length} butir soal berhasil ditambahkan ke Bank Soal CBT!`);
-  };
-
-  // Publish AI questions as new Exam Code for students
-  const handlePublishAsExamCode = () => {
-    if (aiGeneratedQuestions.length === 0) return;
-    
-    // Save questions to bank first
-    onAddCustomQuestions(aiGeneratedQuestions);
-
-    const generatedCode = `${aiSubject.slice(0, 3).toUpperCase()}${aiGrade.replace(/\D/g, '')}-${Math.floor(100 + Math.random() * 900)}`;
-    const newCode: ExamCode = {
-      id: `code-${Date.now()}`,
-      code: generatedCode,
-      title: `Ujian ${aiSubject}: ${aiTopic || 'Materi Pembelajaran'}`,
-      subjectId: aiSubject.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      subjectName: aiSubject,
-      grade: aiGrade,
-      durationMinutes: Math.max(10, aiGeneratedQuestions.length * 2),
-      kkm: 75,
-      questionCount: aiGeneratedQuestions.length,
-      createdByName: activeTeacher ? activeTeacher.name : 'Dewan Guru SMP',
-      createdByNiy: activeTeacher ? activeTeacher.niy : '19850412201001',
-      createdAt: new Date().toISOString(),
-      isActive: true,
-    };
-
-    onSaveExamCode(newCode);
-    setAiSuccessFeedback(`🎉 Soal berhasil diterbitkan! Siswa sekarang dapat langsung login dengan Kode Ujian: "${generatedCode}"`);
+    setDocumentQuestionsSaved(true);
+    setAiSuccessFeedback(`${aiGeneratedQuestions.length} soal berhasil disimpan ke Bank Soal.`);
     playSuccessSound();
   };
 
   // Create Manual Exam Code
-  const handleCreateExamCode = (e: React.FormEvent) => {
+  const handleCreateExamCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCodeName.trim() || !newCodeTitle.trim()) return;
+    setCodeErrorMsg('');
 
     const sub = subjects.find((s) => s.id === newCodeSubject);
     const subQuestions = questions.filter((q) => q.subjectId === newCodeSubject);
@@ -301,28 +233,46 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       durationMinutes: Number(newCodeDuration) || 20,
       kkm: Number(newCodeKKM) || 75,
       questionCount: subQuestions.length > 0 ? subQuestions.length : 5,
-      createdByName: activeTeacher ? activeTeacher.name : 'Dewan Guru SMP',
-      createdByNiy: activeTeacher ? activeTeacher.niy : '19850412201001',
+      createdByName: activeTeacher?.name || 'Guru',
       createdAt: new Date().toISOString(),
       isActive: true,
     };
 
-    onSaveExamCode(code);
-    setCodeSuccessMsg(`Kode ujian "${code.code}" berhasil diaktifkan untuk siswa!`);
-    setNewCodeName('');
-    setNewCodeTitle('');
+    setIsSavingCode(true);
+    try {
+      await onSaveExamCode(code);
+      setCodeSuccessMsg(`Kode ujian "${code.code}" berhasil diaktifkan untuk siswa!`);
+      setNewCodeName('');
+      setNewCodeTitle('');
+    } catch (error) {
+      setCodeErrorMsg(error instanceof Error ? error.message : 'Kode ujian gagal disimpan.');
+    } finally {
+      setIsSavingCode(false);
+    }
+  };
+
+  const handleDeleteExamCode = async (codeId: string) => {
+    setCodeErrorMsg('');
+    setDeletingCodeId(codeId);
+    try {
+      await onDeleteExamCode(codeId);
+    } catch (error) {
+      setCodeErrorMsg(error instanceof Error ? error.message : 'Kode ujian gagal dihapus.');
+    } finally {
+      setDeletingCodeId('');
+    }
   };
 
   // Export Results CSV
   const handleExportResultsCSV = () => {
     if (filteredResults.length === 0) return;
 
-    const headers = ['No', 'Nama_Siswa', 'Kelas', 'NISN', 'Mata_Pelajaran', 'Skor', 'Ketuntasan', 'Benar', 'Salah', 'Durasi_Detik', 'Tanggal'];
+    const headers = ['No', 'Nama_Siswa', 'Kelas', 'No_Absen', 'Mata_Pelajaran', 'Skor', 'Ketuntasan', 'Benar', 'Salah', 'Durasi_Detik', 'Tanggal'];
     const rows = filteredResults.map((r, i) => [
       i + 1,
       `"${r.studentName}"`,
       r.studentClass,
-      r.nisn || '-',
+      r.noAbsen || '-',
       `"${r.subjectName}"`,
       r.score,
       r.passed ? 'TUNTAS' : 'REMEDIAL',
@@ -350,35 +300,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 text-xs font-semibold mb-2">
             <GraduationCap className="w-3.5 h-3.5" />
-            Panel Khusus Guru SMP • Real-time Sync
+            SMP Al-Qur'an Terpadu Yanbu'ul Quran 1
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
             Dashboard Guru & Manajemen Ujian
           </h1>
           <p className="text-slate-300 text-xs sm:text-sm max-w-xl mt-1 leading-relaxed">
-            {activeTeacher ? (
-              <span>
-                Selamat bertugas, <strong>{activeTeacher.name}</strong> (NIY: {activeTeacher.niy}) • {activeTeacher.subject}
-              </span>
-            ) : (
-              'Pantau nilai siswa, analisis progres belajar, buat soal cerdas dengan AI, dan kelola kode ujian siswa.'
-            )}
+            Kelola hasil belajar, bank soal, dan sesi ujian.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => {
-              playNavigationSound();
-              setActiveTab('ai_generator');
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/30 transition-all cursor-pointer"
-          >
-            <Sparkles className="w-4 h-4 text-amber-300" />
-            <span>AI Pembuat Soal</span>
-          </button>
-
           {activeTeacher && (
             <button
               type="button"
@@ -387,7 +319,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
-              <span className="hidden sm:inline">Keluar</span>
+              <span>Keluar</span>
             </button>
           )}
         </div>
@@ -480,16 +412,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         <button
           onClick={() => {
             playNavigationSound();
-            setActiveTab('ai_generator');
+            setActiveTab('document_import');
           }}
           className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeTab === 'ai_generator'
+            activeTab === 'document_import'
               ? 'bg-indigo-600 text-white shadow-sm'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>AI Pembuat Soal & Word/PDF</span>
+          <Upload className="w-4 h-4" />
+          <span>Buat Soal dari File</span>
         </button>
 
         <button
@@ -614,7 +546,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                         <td className="py-3 px-4 text-center text-slate-400 font-bold">{idx + 1}</td>
                         <td className="py-3 px-4 font-bold text-slate-800 dark:text-slate-100">
                           {r.studentName}
-                          {r.nisn && <div className="text-[10px] text-slate-400 font-normal">NISN: {r.nisn}</div>}
+                          {r.noAbsen && (
+                            <div className="text-[10px] text-slate-400 font-normal">No. Absen: {r.noAbsen}</div>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-medium">
                           {r.studentClass}
@@ -752,284 +686,105 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
       )}
 
-      {/* ================= TAB 4: AI QUESTION GENERATOR & WORD/PDF RENDER ================= */}
-      {activeTab === 'ai_generator' && (
+      {/* ================= TAB 4: IMPOR SOAL DARI DOKUMEN ================= */}
+      {activeTab === 'document_import' && (
         <div className="space-y-6">
-          {/* AI Banner */}
-          <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 p-6 rounded-3xl text-white border border-indigo-400/20 shadow-lg">
-            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-200 text-xs font-semibold w-max mb-2">
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              AI Assistant Pembuat Soal SMP Terpadu
-            </div>
-            <h2 className="text-xl sm:text-2xl font-black">
-              Buat Soal Instan dengan AI & Cetak Dokumen Word / PDF
-            </h2>
-            <p className="text-xs sm:text-sm text-blue-100/90 mt-1 max-w-2xl leading-relaxed">
-              Guru tidak perlu lagi kesulitan membuat atau memformat file manual yang rumit. Tentukan materi atau tempelkan teks apa saja, AI akan merender soal pilihan ganda lengkap dengan kunci jawaban tebal dan langsung menerbitkannya sebagai kode ujian siswa!
-            </p>
-          </div>
-
-          {/* Feedback message */}
-          {aiSuccessFeedback && (
-            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-600" />
-                <span className="font-semibold">{aiSuccessFeedback}</span>
-              </div>
-              <button
-                onClick={() => setAiSuccessFeedback('')}
-                className="text-emerald-600 hover:text-emerald-900 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {/* Generator Input Card */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-5">
-            {/* Mode Selector */}
-            <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
-              <button
-                type="button"
-                onClick={() => setAiMode('prompt')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                  aiMode === 'prompt'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                1. Buat Berdasarkan Topik / Materi Kurikulum
-              </button>
-              <button
-                type="button"
-                onClick={() => setAiMode('document')}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                  aiMode === 'document'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                2. Tempel Teks Bebas Dokumen Word/PDF
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Buat Soal dari Dokumen</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Mata Pelajaran
-                </label>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Mata Pelajaran</label>
                 <select
-                  value={aiSubject}
-                  onChange={(e) => setAiSubject(e.target.value)}
+                  value={aiSubjectId}
+                  onChange={(event) => {
+                    setAiSubjectId(event.target.value);
+                    setAiSubject(subjects.find((subject) => String(subject.id) === event.target.value)?.name || '');
+                  }}
                   className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
                 >
-                  {subjects.map((s) => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
+                  {subjects.map((subject) => (
+                    <option key={subject.id} value={subject.id}>{subject.name}</option>
                   ))}
                 </select>
               </div>
-
               <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tingkat Kelas
-                </label>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Tingkat Kelas</label>
                 <select
                   value={aiGrade}
-                  onChange={(e) => setAiGrade(e.target.value as any)}
+                  onChange={(event) => setAiGrade(event.target.value as typeof aiGrade)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
                 >
-                  <option value="Kelas 7">Kelas 7 SMP</option>
-                  <option value="Kelas 8">Kelas 8 SMP</option>
-                  <option value="Kelas 9">Kelas 9 SMP</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Jumlah Soal (Pilihan Ganda)
-                </label>
-                <select
-                  value={aiQuestionCount}
-                  onChange={(e) => setAiQuestionCount(Number(e.target.value))}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
-                >
-                  <option value={3}>3 Butir Soal (Uji Coba Cepat)</option>
-                  <option value={5}>5 Butir Soal (Standar Kuis)</option>
-                  <option value={8}>8 Butir Soal</option>
-                  <option value={10}>10 Butir Soal (Penilaian Harian)</option>
-                  <option value={15}>15 Butir Soal (Asesmen Sumatif)</option>
-                  <option value={20}>20 Butir Soal (Ujian Lengkap)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tingkat Kesulitan
-                </label>
-                <select
-                  value={aiDifficulty}
-                  onChange={(e) => setAiDifficulty(e.target.value as any)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-semibold"
-                >
-                  <option value="Campuran">Campuran (Mudah, Sedang, Sulit)</option>
-                  <option value="Mudah">Tingkat Mudah</option>
-                  <option value="Sedang">Tingkat Sedang (Standar)</option>
-                  <option value="Sulit">Tingkat Sulit (HOTS)</option>
+                  <option value="Kelas 7">Kelas 7</option>
+                  <option value="Kelas 8">Kelas 8</option>
+                  <option value="Kelas 9">Kelas 9</option>
                 </select>
               </div>
             </div>
 
-            {aiMode === 'prompt' ? (
-              <div>
-                <label className="block font-bold text-xs text-slate-700 dark:text-slate-300 mb-1">
-                  Topik / Pokok Bahasan Materi Ujian
-                </label>
-                <input
-                  type="text"
-                  value={aiTopic}
-                  onChange={(e) => setAiTopic(e.target.value)}
-                  placeholder="Misal: Sistem Ekskresi Manusia, Teorema Pythagoras, Teks Laporan Observasi..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-            ) : (
-              <div>
-                <label className="block font-bold text-xs text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
-                  <span>Salin & Tempel (Copy-Paste) Teks Soal / Materi Mentah</span>
-                  <span className="text-[11px] text-slate-400 font-normal">Dari Word, PDF, atau catatan</span>
-                </label>
-                <textarea
-                  rows={6}
-                  value={aiRawText}
-                  onChange={(e) => setAiRawText(e.target.value)}
-                  placeholder="Contoh:
-1. Hasil dari 2x + 5 = 15 adalah...
-A. 3
-B. 5
-C. 7
-D. 10
-Kunci: B
-Pembahasan: 2x = 10, maka x = 5"
-                  className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-            )}
-
+            <input
+              ref={documentInputRef}
+              type="file"
+              accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+              onChange={handleProcessDocument}
+              className="hidden"
+            />
             <button
               type="button"
-              disabled={isGeneratingAI || (aiMode === 'document' && !aiRawText.trim())}
-              onClick={handleGenerateQuestionsAI}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-600 hover:from-indigo-700 hover:to-blue-700 disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all"
+              onClick={() => documentInputRef.current?.click()}
+              disabled={isGeneratingAI}
+              className="w-full py-4 px-4 rounded-xl border-2 border-dashed border-blue-300 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 hover:bg-blue-50 dark:hover:bg-blue-950/40 disabled:opacity-60 text-blue-700 dark:text-blue-300 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors"
             >
-              {isGeneratingAI ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>AI Sedang Merumuskan {aiQuestionCount} Butir Soal Edukatif...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>
-                    {aiMode === 'prompt' 
-                      ? `Hasilkan ${aiQuestionCount} Butir Soal dengan AI Sekarang` 
-                      : 'Bedah Teks & Ekstrak Soal dengan AI'}
-                  </span>
-                </>
-              )}
+              {isGeneratingAI ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              <span>{isGeneratingAI ? 'Memproses dokumen...' : 'Pilih file Word (.docx) atau PDF'}</span>
             </button>
+            {selectedDocumentName && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">File: {selectedDocumentName}</p>
+            )}
+            {documentError && (
+              <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs">
+                {documentError}
+              </div>
+            )}
+            {aiSuccessFeedback && (
+              <div role="status" className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs">
+                {aiSuccessFeedback}
+              </div>
+            )}
           </div>
 
-          {/* Render Output & Action Buttons */}
           {aiGeneratedQuestions.length > 0 && (
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-5 animate-in fade-in">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
-                <div>
-                  <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                    <FileCheck className="w-4 h-4 text-emerald-600" />
-                    Hasil Render Paket Soal ({aiGeneratedQuestions.length} Butir)
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Kunci jawaban telah dicetak tebal (bold) untuk pegangan guru.
-                  </p>
-                </div>
-
-                {/* Primary Export Buttons: Word (.doc), Print/PDF, Publish to Exam Code */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleExportWord}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Render Dokumen Word (.doc)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handlePrintPDF}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Cetak / Simpan PDF</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handlePublishAsExamCode}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Terbitkan Kode Ujian Siswa</span>
-                  </button>
-                </div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                  Pratinjau Soal ({aiGeneratedQuestions.length})
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleSaveDocumentQuestions}
+                  disabled={documentQuestionsSaved}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-emerald-600 text-white font-bold text-xs shadow-md transition-colors"
+                >
+                  <Check className="w-4 h-4" />
+                  {documentQuestionsSaved ? 'Tersimpan' : 'Simpan Soal'}
+                </button>
               </div>
-
-              {/* Question Items Preview with Bold Answer Key */}
               <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
-                {aiGeneratedQuestions.map((q, idx) => (
-                  <div key={q.id || idx} className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2.5 text-xs">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-blue-600">Nomor {idx + 1}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 font-semibold text-[10px]">
-                          {q.difficulty}
-                        </span>
-                        <span className="text-slate-400 text-[11px]">{q.topic}</span>
-                      </div>
-                    </div>
-
-                    <div className="font-bold text-slate-800 dark:text-slate-100 text-sm">
-                      {q.questionText}
-                    </div>
-
+                {aiGeneratedQuestions.map((question, index) => (
+                  <div key={question.id} className="p-4 rounded-xl bg-slate-50/70 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-2.5 text-xs">
+                    <div className="font-extrabold text-blue-600">Nomor {index + 1}</div>
+                    <div className="font-bold text-slate-800 dark:text-slate-100 text-sm">{question.questionText}</div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      {(['A', 'B', 'C', 'D'] as OptionKey[]).map((key) => {
-                        const isCorrect = q.correctAnswer === key;
-                        return (
-                          <div
-                            key={key}
-                            className={`p-2.5 rounded-lg border text-xs flex items-center justify-between ${
-                              isCorrect
-                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 font-black ring-1 ring-emerald-500'
-                                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-700 dark:text-slate-300'
-                            }`}
-                          >
-                            <span>
-                              <strong>{key}.</strong> {q.options[key]}
-                            </span>
-                            {isCorrect && (
-                              <span className="text-[10px] uppercase font-black text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded bg-emerald-200 dark:bg-emerald-900">
-                                Kunci Jawaban (Tebal)
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {(['A', 'B', 'C', 'D'] as OptionKey[]).map((key) => (
+                        <div key={key} className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-700 dark:text-slate-300">
+                          <strong>{key}.</strong> {question.options[key]}
+                        </div>
+                      ))}
                     </div>
-
-                    <div className="p-2.5 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 text-[11px] text-blue-900 dark:text-blue-200 border border-blue-100 dark:border-blue-900/40">
-                      <strong>Pembahasan Edukatif:</strong> {q.explanation}
-                    </div>
+                    {question.explanation && (
+                      <div className="p-2.5 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 text-[11px] text-blue-900 dark:text-blue-200">
+                        <strong>Pembahasan:</strong> {question.explanation}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1041,6 +796,12 @@ Pembahasan: 2x = 10, maka x = 5"
       {/* ================= TAB 5: KELOLA KODE UJIAN SISWA ================= */}
       {activeTab === 'exam_codes' && (
         <div className="space-y-6">
+          {codeErrorMsg && (
+            <div role="alert" className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-2xl text-rose-700 dark:text-rose-300 text-xs">
+              {codeErrorMsg}
+            </div>
+          )}
+
           {codeSuccessMsg && (
             <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1149,9 +910,10 @@ Pembahasan: 2x = 10, maka x = 5"
 
               <button
                 type="submit"
+                disabled={isSavingCode}
                 className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
               >
-                + Simpan & Aktifkan Kode Ujian
+                {isSavingCode ? 'Menyimpan...' : '+ Simpan & Aktifkan Kode Ujian'}
               </button>
             </form>
           </div>
@@ -1175,11 +937,12 @@ Pembahasan: 2x = 10, maka x = 5"
                     </span>
                     <button
                       type="button"
-                      onClick={() => onDeleteExamCode(c.id)}
-                      className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
+                      onClick={() => void handleDeleteExamCode(c.id)}
+                      disabled={deletingCodeId === c.id}
+                      className="p-1 text-slate-400 hover:text-rose-500 transition-colors disabled:opacity-50"
                       title="Hapus Kode Ujian"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {deletingCodeId === c.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
                   </div>
 
@@ -1194,9 +957,6 @@ Pembahasan: 2x = 10, maka x = 5"
                     <span>KKM: <strong>{c.kkm}</strong></span>
                   </div>
 
-                  <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-200 dark:border-slate-700/60">
-                    Dibuat oleh: <span className="font-semibold text-slate-700 dark:text-slate-300">{c.createdByName}</span>
-                  </div>
                 </div>
               ))}
             </div>
@@ -1223,17 +983,14 @@ Pembahasan: 2x = 10, maka x = 5"
             </div>
           )}
 
-          {/* Quick AI shortcut */}
-          <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-xs flex items-center justify-between">
-            <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200">
-              <Sparkles className="w-4 h-4 text-indigo-600" />
-              <span>Gunakan AI untuk membuat soal otomatis atau ekstrak teks bebas tanpa repot format CSV.</span>
-            </div>
+          {/* Document import shortcut */}
+          <div className="p-4 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-2xl text-xs flex items-center justify-between">
+            <span className="text-blue-900 dark:text-blue-200">Unggah dokumen Word atau PDF untuk menyiapkan soal.</span>
             <button
-              onClick={() => setActiveTab('ai_generator')}
-              className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white font-bold text-xs"
+              onClick={() => setActiveTab('document_import')}
+              className="px-3 py-1.5 rounded-xl bg-blue-600 text-white font-bold text-xs"
             >
-              Buka AI Generator
+              Unggah Dokumen
             </button>
           </div>
 

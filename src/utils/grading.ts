@@ -153,7 +153,7 @@ export function buildExamResult(
     id: `res-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     studentName: student.name.trim(),
     studentClass: student.studentClass.trim(),
-    nisn: student.nisn?.trim() || undefined,
+    noAbsen: student.noAbsen?.trim() || undefined,
     subjectId: subject.id,
     subjectName: subject.name,
     score,

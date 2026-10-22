@@ -3,7 +3,6 @@ import {
   doc, 
   setDoc, 
   deleteDoc, 
-  getDocs, 
   onSnapshot, 
   getDocFromServer 
 } from 'firebase/firestore';
@@ -128,7 +127,7 @@ export async function saveResultToFirestore(result: ExamResult): Promise<void> {
       id: result.id,
       studentName: result.studentName,
       studentClass: result.studentClass,
-      nisn: result.nisn || '',
+      noAbsen: result.noAbsen || '',
       subjectId: result.subjectId,
       subjectName: result.subjectName,
       score: result.score,
@@ -211,59 +210,3 @@ export async function deleteQuestionFromFirestore(questionId: string): Promise<v
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
-
-/**
- * Real-time listener for Exam Codes in Firestore
- */
-export function subscribeToFirestoreExamCodes(
-  onCodesChanged: (codes: any[]) => void
-): () => void {
-  const collectionPath = 'examCodes';
-
-  try {
-    const unsub = onSnapshot(
-      collection(db, collectionPath),
-      (snapshot) => {
-        const list: any[] = [];
-        snapshot.forEach((d) => {
-          list.push(d.data());
-        });
-        onCodesChanged(list);
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.GET, collectionPath);
-      }
-    );
-
-    return unsub;
-  } catch (error) {
-    console.error('Error attaching exam codes listener:', error);
-    return () => {};
-  }
-}
-
-/**
- * Save or update Exam Code in Firestore
- */
-export async function saveExamCodeToFirestore(codeData: any): Promise<void> {
-  const path = `examCodes/${codeData.id}`;
-  try {
-    const payload = cleanDataForFirestore(codeData);
-    await setDoc(doc(db, 'examCodes', codeData.id), payload);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-  }
-}
-
-/**
- * Delete Exam Code from Firestore
- */
-export async function deleteExamCodeFromFirestore(codeId: string): Promise<void> {
-  const path = `examCodes/${codeId}`;
-  try {
-    await deleteDoc(doc(db, 'examCodes', codeId));
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
-  }
-}
-
