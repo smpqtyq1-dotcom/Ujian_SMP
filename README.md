@@ -14,11 +14,12 @@
 
 ## Konfigurasi server
 
-API untuk login guru dan kode ujian memerlukan Firebase Admin. Isi `GOOGLE_APPLICATION_CREDENTIALS` dengan path lokal ke service-account JSON, atau gunakan `FIREBASE_SERVICE_ACCOUNT_JSON`. Jangan commit file service account atau `.env.local`.
+API login guru dan daftar nama siswa membaca tabel `guru` dan `siswa` dari Supabase lewat server. Isi `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY` di environment server. Service-role key hanya digunakan server; jangan menaruhnya di kode browser atau commit ke repositori.
 
 - `SESSION_SECRET`: rahasia acak minimal 32 karakter untuk cookie sesi guru.
-- `TEACHER_NIY_ACCOUNTS`: JSON array akun guru, misalnya `[{"id":"guru-1","name":"Nama Guru","niy":"NIY-RAHASIA","subject":"Matematika"}]`. Nilai NIY hanya disimpan di environment server.
+- `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY`: koneksi server untuk membaca `guru(id,nama,niy)` dan `siswa(id,nama,kelas)`.
+- `GOOGLE_APPLICATION_CREDENTIALS`: path lokal ke Firebase service-account JSON, atau gunakan `FIREBASE_SERVICE_ACCOUNT_JSON`. Dibutuhkan untuk penyimpanan kode ujian.
 - `FIREBASE_PROJECT_ID` dan `FIRESTORE_DATABASE_ID`: opsional jika menggunakan project/database pada `firebase-applet-config.json`.
 - `GEMINI_API_KEY`: diperlukan untuk membuat soal dari dokumen Word/PDF; simpan hanya di environment server.
 
-Jika variabel server belum diisi, endpoint terkait akan menampilkan pesan konfigurasi yang jelas dan fitur tersebut tidak dapat digunakan.
+Di Vercel, tambahkan variabel server tersebut pada **Project Settings → Environment Variables**, lalu redeploy. Halaman proyek yang dibagikan saat ini belum menampilkan deployment produksi. Jika variabel belum diisi, endpoint terkait menampilkan pesan konfigurasi yang jelas dan fitur tersebut tidak dapat digunakan.

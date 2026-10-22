@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Laptop, 
   GraduationCap, 
@@ -11,12 +11,11 @@ import {
 } from 'lucide-react';
 import { ExamCode, StudentProfile, TeacherProfile } from '../types/quiz.ts';
 import { playNavigationSound } from '../utils/soundEffects.ts';
-import { loginTeacher, validateStudentExamCode } from '../utils/secureApi.ts';
+import { loadStudentRoster, loginTeacher, StudentRosterEntry, validateStudentExamCode } from '../utils/secureApi.ts';
 
 interface PortalAuthProps {
-onStudentEnterExam: (student: StudentProfile, examCode: ExamCode) => void;
-onTeacherLogin: (teacher: TeacherProfile) => Promise<void>;
-onGuestStudentDirectExam?: () => void;
+  onStudentEnterExam: (student: StudentProfile, examCode: ExamCode) => void;
+  onTeacherLogin: (teacher: TeacherProfile) => Promise<void>;
 }
 
 export const PortalAuth: React.FC<PortalAuthProps> = ({
@@ -27,8 +26,11 @@ onTeacherLogin,
 
   // Student State
   const [inputExamCode, setInputExamCode] = useState('');
-  const [studentName, setStudentName] = useState('');
-  const [studentClass, setStudentClass] = useState('8A');
+  const [studentClass, setStudentClass] = useState('');
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [students, setStudents] = useState<StudentRosterEntry[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [rosterError, setRosterError] = useState('');
   const [attendanceNumber, setAttendanceNumber] = useState('');
   const [studentError, setStudentError] = useState('');
   const [isCheckingExamCode, setIsCheckingExamCode] = useState(false);
@@ -38,18 +40,45 @@ onTeacherLogin,
   const [teacherError, setTeacherError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  useEffect(() => {
+    setSelectedStudentId('');
+    setStudents([]);
+    setRosterError('');
+    if (!studentClass || !inputExamCode.trim()) {
+      setIsLoadingStudents(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsLoadingStudents(true);
+    void loadStudentRoster(studentClass, inputExamCode.trim(), controller.signal)
+      .then(setStudents)
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setRosterError(error instanceof Error ? error.message : 'Daftar siswa tidak dapat dimuat.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingStudents(false);
+      });
+    return () => controller.abort();
+  }, [studentClass, inputExamCode]);
+
   // Student Submit
   const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStudentError('');
 
-    if (!inputExamCode.trim()) {
-      setStudentError('Silakan masukkan Kode Ujian yang diberikan oleh Guru.');
+    const selectedStudent = students.find((student) => student.id === selectedStudentId);
+    if (!studentClass) {
+      setStudentError('Silakan pilih kelas terlebih dahulu.');
       return;
     }
-
-    if (!studentName.trim()) {
-      setStudentError('Silakan lengkapi nama lengkap Anda.');
+    if (!selectedStudent) {
+      setStudentError('Silakan pilih nama siswa dari daftar kelas.');
+      return;
+    }
+    if (!inputExamCode.trim()) {
+      setStudentError('Silakan masukkan Kode Ujian yang diberikan oleh Guru.');
       return;
     }
 
@@ -59,7 +88,7 @@ onTeacherLogin,
       playNavigationSound();
       onStudentEnterExam(
         {
-          name: studentName.trim(),
+          name: selectedStudent.name,
           studentClass,
           noAbsen: attendanceNumber.trim() || undefined,
         },
@@ -196,40 +225,60 @@ onTeacherLogin,
                 </div>
               </div>
 
-              {/* Step 2: Minimal Student Info */}
+              {/* Step 2: Select the class before loading its student names */}
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Nama Lengkap Siswa <span className="text-rose-500">*</span>
+                    Kelas <span className="text-rose-500">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    placeholder="Contoh: Muhammad Farhan"
+                    value={studentClass}
+                    onChange={(e) => setStudentClass(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                  >
+                    <option value="">Pilih kelas</option>
+                    {['7', '8', '9'].flatMap((grade) =>
+                      ['A', 'B', 'C', 'D', 'E'].map((room) => {
+                        const className = `${grade}${room}`;
+                        return (
+                          <option key={className} value={className}>
+                            Kelas {className}
+                          </option>
+                        );
+                      })
+                    )}
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Kelas <span className="text-rose-500">*</span>
+                      Nama Lengkap Siswa <span className="text-rose-500">*</span>
                     </label>
                     <select
-                      value={studentClass}
-                      onChange={(e) => setStudentClass(e.target.value)}
+                      required
+                      value={selectedStudentId}
+                      onChange={(e) => setSelectedStudentId(e.target.value)}
+                      disabled={!studentClass || isLoadingStudents || students.length === 0}
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      {['7', '8', '9'].flatMap((grade) =>
-                        ['A', 'B', 'C', 'D', 'E'].map((room) => (
-                          <option key={`${grade}${room}`} value={`${grade}${room}`}>
-                            Kelas {grade}{room}
-                          </option>
-                        ))
-                      )}
+                      <option value="">
+                        {!studentClass
+                          ? 'Pilih kelas terlebih dahulu'
+                          : isLoadingStudents
+                            ? 'Memuat nama siswa...'
+                            : !inputExamCode.trim()
+                              ? 'Masukkan kode ujian terlebih dahulu'
+                            : students.length
+                              ? 'Pilih nama siswa'
+                              : 'Tidak ada data siswa'}
+                      </option>
+                      {students.map((student) => (
+                        <option key={student.id} value={student.id}>{student.name}</option>
+                      ))}
                     </select>
+                    {rosterError && <p role="alert" className="mt-1.5 text-xs text-rose-600">{rosterError}</p>}
                   </div>
 
                   <div>

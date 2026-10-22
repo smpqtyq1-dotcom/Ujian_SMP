@@ -314,7 +314,6 @@ export default function App() {
       {/* Top Navigation */}
       <Navbar
         portalMode={portalMode}
-        setPortalMode={setPortalMode}
         activeStudent={activeStudent}
         activeTeacher={activeTeacher}
         onLogoutStudent={handleLogoutStudent}

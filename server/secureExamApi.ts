@@ -9,13 +9,14 @@ interface ServerTeacher extends TeacherProfile {
   niy: string;
 }
 
-interface ApiEnvironment {
+export interface ApiEnvironment {
   FIREBASE_PROJECT_ID?: string;
   FIREBASE_SERVICE_ACCOUNT_JSON?: string;
   FIRESTORE_DATABASE_ID?: string;
   GOOGLE_APPLICATION_CREDENTIALS?: string;
   SESSION_SECRET?: string;
-  TEACHER_NIY_ACCOUNTS?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
 }
 
 class ApiError extends Error {
@@ -32,6 +33,15 @@ const SESSION_DURATION_SECONDS = 8 * 60 * 60;
 const MAX_REQUEST_BYTES = 32_000;
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 let firestore: Firestore | null = null;
+let teacherCache: { expiresAt: number; teachers: ServerTeacher[] } | null = null;
+
+const VALID_CLASSES = new Set(
+  ['7', '8', '9'].flatMap((grade) => ['A', 'B', 'C', 'D', 'E'].map((room) => `${grade}${room}`))
+);
+type PublicExamCode = Omit<ExamCode, 'createdByName' | 'createdByNiy'> & {
+  createdByName?: string;
+  createdByNiy?: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -72,32 +82,84 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-function getEnvironmentTeachers(env: ApiEnvironment): ServerTeacher[] {
-  if (!env.TEACHER_NIY_ACCOUNTS) {
-    throw new ApiError(503, 'Autentikasi guru belum dikonfigurasi.');
+function getSupabaseConfig(env: ApiEnvironment): { url: URL; key: string } {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new ApiError(503, 'Koneksi server ke data Supabase belum dikonfigurasi.');
   }
-  let accounts: unknown;
+  let url: URL;
   try {
-    accounts = JSON.parse(env.TEACHER_NIY_ACCOUNTS);
+    url = new URL(env.SUPABASE_URL);
   } catch {
-    throw new ApiError(503, 'Konfigurasi autentikasi guru tidak valid.');
+    throw new ApiError(503, 'Alamat Supabase server tidak valid.');
   }
-  if (!Array.isArray(accounts)) {
-    throw new ApiError(503, 'Konfigurasi autentikasi guru tidak valid.');
+  if (url.protocol !== 'https:') {
+    throw new ApiError(503, 'Koneksi Supabase harus menggunakan HTTPS.');
   }
+  return { url, key: env.SUPABASE_SERVICE_ROLE_KEY };
+}
 
-  const teachers = accounts.filter((account): account is ServerTeacher => {
-    return Boolean(
-      account &&
-      typeof account === 'object' &&
-      typeof account.id === 'string' &&
-      typeof account.name === 'string' &&
-      typeof account.subject === 'string' &&
-      typeof account.niy === 'string'
-    );
+async function fetchSupabaseRows(
+  env: ApiEnvironment,
+  table: 'guru' | 'siswa',
+  query: URLSearchParams
+): Promise<Record<string, unknown>[]> {
+  const { url: baseUrl, key } = getSupabaseConfig(env);
+  const url = new URL(`rest/v1/${table}`, `${baseUrl.toString().replace(/\/+$/, '')}/`);
+  url.search = query.toString();
+  const response = await fetch(url, {
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      Accept: 'application/json',
+    },
   });
-  if (!teachers.length) throw new ApiError(503, 'Belum ada akun guru yang dikonfigurasi.');
+  if (!response.ok) {
+    console.error(`Supabase ${table} query failed with status ${response.status}.`);
+    throw new ApiError(503, 'Data sekolah tidak dapat dimuat dari Supabase.');
+  }
+  const data: unknown = await response.json();
+  if (!Array.isArray(data) || !data.every(isRecord)) {
+    throw new ApiError(503, 'Format data sekolah dari Supabase tidak valid.');
+  }
+  return data;
+}
+
+async function getSupabaseTeachers(env: ApiEnvironment): Promise<ServerTeacher[]> {
+  if (teacherCache && teacherCache.expiresAt > Date.now()) return teacherCache.teachers;
+  const rows = await fetchSupabaseRows(
+    env,
+    'guru',
+    new URLSearchParams({ select: 'id,nama,niy', limit: '1000' })
+  );
+  const teachers = rows.flatMap((row): ServerTeacher[] => {
+    if (
+      (typeof row.id !== 'string' && typeof row.id !== 'number') ||
+      typeof row.nama !== 'string' ||
+      (typeof row.niy !== 'string' && typeof row.niy !== 'number')
+    ) {
+      return [];
+    }
+    return [{
+      id: String(row.id),
+      name: row.nama,
+      niy: String(row.niy),
+      subject: 'Guru',
+    }];
+  });
+  teacherCache = { teachers, expiresAt: Date.now() + 60_000 };
   return teachers;
+}
+
+async function findActiveExamCode(env: ApiEnvironment, value: string): Promise<PublicExamCode> {
+  const code = value.trim().toUpperCase();
+  if (!code || code.length > 40) throw new ApiError(400, 'Masukkan kode ujian.');
+  const snapshot = await getDatabase(env).collection('examCodes')
+    .where('code', '==', code)
+    .where('isActive', '==', true)
+    .limit(1)
+    .get();
+  if (snapshot.empty) throw new ApiError(404, 'Kode ujian tidak ditemukan atau tidak aktif.');
+  return safeExamCode(snapshot.docs[0].data() as ExamCode);
 }
 
 function getSessionSecret(env: ApiEnvironment): string {
@@ -169,10 +231,10 @@ function createSessionToken(teacherId: string, secret: string): string {
   return `${payload}.${signature}`;
 }
 
-function getTeacherFromRequest(
+async function getTeacherFromRequest(
   req: IncomingMessage,
   env: ApiEnvironment
-): TeacherProfile {
+): Promise<TeacherProfile> {
   const cookieHeader = req.headers.cookie || '';
   const cookie = cookieHeader
     .split(';')
@@ -199,7 +261,7 @@ function getTeacherFromRequest(
     throw new ApiError(401, 'Sesi guru sudah berakhir. Silakan masuk kembali.');
   }
 
-  const teacher = getEnvironmentTeachers(env).find((entry) => entry.id === tokenData.teacherId);
+  const teacher = (await getSupabaseTeachers(env)).find((entry) => entry.id === tokenData.teacherId);
   if (!teacher) throw new ApiError(401, 'Akun guru tidak lagi terdaftar. Silakan masuk kembali.');
   return toPublicTeacherProfile(teacher);
 }
@@ -244,10 +306,7 @@ function rateLimitLogin(req: IncomingMessage): void {
   if (current.count > 8) throw new ApiError(429, 'Terlalu banyak percobaan. Coba lagi 15 menit kemudian.');
 }
 
-function safeExamCode(code: ExamCode): Omit<ExamCode, 'createdByName' | 'createdByNiy'> & {
-  createdByName?: string;
-  createdByNiy?: string;
-} {
+function safeExamCode(code: ExamCode): PublicExamCode {
   const { createdByNiy: _createdByNiy, createdByName: _createdByName, ...safeCode } = code;
   return safeCode;
 }
@@ -261,9 +320,11 @@ function handleError(res: ServerResponse, error: unknown, context: string): void
   sendJson(res, 500, { error: 'Layanan sedang mengalami kendala. Coba kembali.' });
 }
 
-export function secureExamApiPlugin(env: ApiEnvironment): Plugin {
-  const installRoutes = (server: ViteDevServer | PreviewServer) => {
-    server.middlewares.use('/api/teacher/login', async (req, res) => {
+type ApiHandler = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
+type ApiRouteRegistrar = (path: string, handler: ApiHandler) => void;
+
+function registerSecureExamApiRoutes(use: ApiRouteRegistrar, env: ApiEnvironment): void {
+    use('/api/teacher/login', async (req, res) => {
       if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'Method Not Allowed' });
         return;
@@ -273,7 +334,7 @@ export function secureExamApiPlugin(env: ApiEnvironment): Plugin {
         const body = await readJsonBody(req);
         const niy = typeof body.niy === 'string' ? normalizeNiy(body.niy) : '';
         if (!niy) throw new ApiError(400, 'Masukkan NIY guru.');
-        const teacher = getEnvironmentTeachers(env).find((entry) =>
+        const teacher = (await getSupabaseTeachers(env)).find((entry) =>
           secureEqual(normalizeNiy(entry.niy), niy)
         );
         if (!teacher) throw new ApiError(401, 'NIY tidak terdaftar.');
@@ -286,19 +347,19 @@ export function secureExamApiPlugin(env: ApiEnvironment): Plugin {
       }
     });
 
-    server.middlewares.use('/api/teacher/session', (req, res) => {
+    use('/api/teacher/session', async (req, res) => {
       if (req.method !== 'GET') {
         sendJson(res, 405, { error: 'Method Not Allowed' });
         return;
       }
       try {
-        sendJson(res, 200, { teacher: getTeacherFromRequest(req, env) });
+        sendJson(res, 200, { teacher: await getTeacherFromRequest(req, env) });
       } catch (error) {
         handleError(res, error, 'Teacher session error');
       }
     });
 
-    server.middlewares.use('/api/teacher/logout', (req, res) => {
+    use('/api/teacher/logout', (req, res) => {
       if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'Method Not Allowed' });
         return;
@@ -307,9 +368,9 @@ export function secureExamApiPlugin(env: ApiEnvironment): Plugin {
       sendJson(res, 200, { ok: true });
     });
 
-    server.middlewares.use('/api/teacher/exam-codes', async (req, res) => {
+    use('/api/teacher/exam-codes', async (req, res) => {
       try {
-        const teacher = getTeacherFromRequest(req, env);
+        const teacher = await getTeacherFromRequest(req, env);
         if (req.method === 'GET') {
           const snapshot = await getDatabase(env).collection('examCodes').get();
           const codes = snapshot.docs.map((document) =>
@@ -349,27 +410,87 @@ export function secureExamApiPlugin(env: ApiEnvironment): Plugin {
       }
     });
 
-    server.middlewares.use('/api/student/validate-exam', async (req, res) => {
+    use('/api/student/validate-exam', async (req, res) => {
       if (req.method !== 'POST') {
         sendJson(res, 405, { error: 'Method Not Allowed' });
         return;
       }
       try {
         const body = await readJsonBody(req);
-        const code = typeof body.code === 'string' ? body.code.trim().toUpperCase() : '';
-        if (!code || code.length > 40) throw new ApiError(400, 'Masukkan kode ujian.');
-        const snapshot = await getDatabase(env).collection('examCodes')
-          .where('code', '==', code)
-          .where('isActive', '==', true)
-          .limit(1)
-          .get();
-        if (snapshot.empty) throw new ApiError(404, 'Kode ujian tidak ditemukan atau tidak aktif.');
-        const examCode = safeExamCode(snapshot.docs[0].data() as ExamCode);
+        const examCode = await findActiveExamCode(env, typeof body.code === 'string' ? body.code : '');
         sendJson(res, 200, { examCode });
       } catch (error) {
         handleError(res, error, 'Student exam code validation error');
       }
     });
+
+    use('/api/student/roster', async (req, res) => {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method Not Allowed' });
+        return;
+      }
+      try {
+        const className = new URL(req.url || '/', 'http://localhost').searchParams.get('class') || '';
+        const examCode = new URL(req.url || '/', 'http://localhost').searchParams.get('code') || '';
+        if (!VALID_CLASSES.has(className)) throw new ApiError(400, 'Pilih kelas yang valid.');
+        await findActiveExamCode(env, examCode);
+        const rows = await fetchSupabaseRows(
+          env,
+          'siswa',
+          new URLSearchParams({
+            select: 'id,nama,kelas',
+            kelas: `eq.${className}`,
+            order: 'nama.asc',
+            limit: '1000',
+          })
+        );
+        const students = rows.flatMap((row) => {
+          if (
+            (typeof row.id !== 'string' && typeof row.id !== 'number') ||
+            typeof row.nama !== 'string' ||
+            typeof row.kelas !== 'string' ||
+            row.kelas !== className
+          ) {
+            return [];
+          }
+          return [{ id: String(row.id), name: row.nama, studentClass: row.kelas }];
+        });
+        sendJson(res, 200, { students });
+      } catch (error) {
+        handleError(res, error, 'Student roster error');
+      }
+    });
+}
+
+export async function handleSecureExamApiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  env: ApiEnvironment
+): Promise<void> {
+  const routes: { path: string; handler: ApiHandler }[] = [];
+  registerSecureExamApiRoutes((routePath, handler) => routes.push({ path: routePath, handler }), env);
+
+  const originalUrl = req.url || '/';
+  const pathname = new URL(originalUrl, 'http://localhost').pathname;
+  const route = routes.find(({ path }) => pathname === path || pathname.startsWith(`${path}/`));
+  if (!route) {
+    sendJson(res, 404, { error: 'Rute API tidak ditemukan.' });
+    return;
+  }
+
+  const queryIndex = originalUrl.indexOf('?');
+  const query = queryIndex < 0 ? '' : originalUrl.slice(queryIndex);
+  req.url = `${pathname.slice(route.path.length) || '/'}${query}`;
+  await route.handler(req, res);
+}
+
+export function secureExamApiPlugin(env: ApiEnvironment): Plugin {
+  const installRoutes = (server: ViteDevServer | PreviewServer) => {
+    registerSecureExamApiRoutes((routePath, handler) => {
+      server.middlewares.use(routePath, (req, res, next) => {
+        void Promise.resolve(handler(req, res)).catch(next);
+      });
+    }, env);
   };
 
   return {

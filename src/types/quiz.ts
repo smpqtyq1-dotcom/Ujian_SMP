@@ -67,7 +67,7 @@ export interface ExamCode {
   kkm: number;
   questionCount: number;
   questionIds?: string[];
-  createdByName: string;
+  createdByName?: string;
   createdByNiy?: string;
   createdAt: string;
   isActive: boolean;

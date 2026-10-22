@@ -77,6 +77,35 @@ export async function validateStudentExamCode(code: string): Promise<ExamCode> {
   return parseExamCode(data.examCode);
 }
 
+export interface StudentRosterEntry {
+  id: string;
+  name: string;
+  studentClass: string;
+}
+
+export async function loadStudentRoster(
+  studentClass: string,
+  examCode: string,
+  signal?: AbortSignal
+): Promise<StudentRosterEntry[]> {
+  const params = new URLSearchParams({ class: studentClass, code: examCode });
+  const response = await fetch(`/api/student/roster?${params}`, { signal });
+  const data = await readResponse(response);
+  if (!Array.isArray(data.students)) throw new Error('Daftar siswa dari server tidak valid.');
+  return data.students.map((value): StudentRosterEntry => {
+    if (
+      !isRecord(value) ||
+      typeof value.id !== 'string' ||
+      typeof value.name !== 'string' ||
+      typeof value.studentClass !== 'string' ||
+      value.studentClass !== studentClass
+    ) {
+      throw new Error('Data siswa dari server tidak valid.');
+    }
+    return { id: value.id, name: value.name, studentClass: value.studentClass };
+  });
+}
+
 export async function loginTeacher(niy: string): Promise<TeacherProfile> {
   const response = await fetch('/api/teacher/login', {
     method: 'POST',
